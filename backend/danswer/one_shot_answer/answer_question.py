@@ -5,7 +5,7 @@ from typing import cast
 from sqlalchemy.orm import Session
 
 from danswer.chat.chat_utils import get_chunks_for_qa
-from danswer.chat.models import DanswerAnswerPiece
+from danswer.chat.models import DanswerAnswerPiece, DanswerContexts
 from danswer.chat.models import DanswerQuotes
 from danswer.chat.models import LLMMetricsContainer
 from danswer.chat.models import LLMRelevanceFilterResponse
@@ -56,8 +56,7 @@ def stream_answer_objects(
     default_chunk_size: int = CHUNK_SIZE,
     timeout: int = QA_TIMEOUT,
     bypass_acl: bool = False,
-    retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None]
-    | None = None,
+    retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None] | None = None,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
     llm_metrics_callback: Callable[[LLMMetricsContainer], None] | None = None,
 ) -> Iterator[
@@ -92,9 +91,7 @@ def stream_answer_objects(
     document_index = get_default_document_index()
 
     # Create a chat session which will just store the root message, the query, and the AI response
-    root_message = get_or_create_root_message(
-        chat_session_id=chat_session.id, db_session=db_session
-    )
+    root_message = get_or_create_root_message(chat_session_id=chat_session.id, db_session=db_session)
 
     history_str = combine_message_thread(history)
 
@@ -149,20 +146,12 @@ def stream_answer_objects(
 
     # Yield the list of LLM selected chunks for showing the LLM selected icons in the UI
     llm_relevance_filtering_response = LLMRelevanceFilterResponse(
-        relevant_chunk_indices=[
-            index for index, value in enumerate(llm_chunk_selection) if value
-        ]
-        if run_llm_chunk_filter
-        else []
+        relevant_chunk_indices=[index for index, value in enumerate(llm_chunk_selection) if value] if run_llm_chunk_filter else []
     )
     yield llm_relevance_filtering_response
 
     # Prep chunks to pass to LLM
-    num_llm_chunks = (
-        chat_session.persona.num_chunks
-        if chat_session.persona.num_chunks is not None
-        else default_num_chunks
-    )
+    num_llm_chunks = chat_session.persona.num_chunks if chat_session.persona.num_chunks is not None else default_num_chunks
     llm_chunks_indices = get_chunks_for_qa(
         chunks=top_chunks,
         llm_chunk_selection=llm_chunk_selection,
@@ -170,19 +159,13 @@ def stream_answer_objects(
     )
     llm_chunks = [top_chunks[i] for i in llm_chunks_indices]
 
-    logger.debug(
-        f"Chunks fed to LLM: {[chunk.semantic_identifier for chunk in llm_chunks]}"
-    )
+    logger.debug(f"Chunks fed to LLM: {[chunk.semantic_identifier for chunk in llm_chunks]}")
 
     prompt = None
     llm_override = None
     if query_req.prompt_id is not None:
-        prompt = get_prompt_by_id(
-            prompt_id=query_req.prompt_id, user_id=user_id, db_session=db_session
-        )
-        persona = get_persona_by_id(
-            persona_id=query_req.persona_id, user_id=user_id, db_session=db_session
-        )
+        prompt = get_prompt_by_id(prompt_id=query_req.prompt_id, user_id=user_id, db_session=db_session)
+        persona = get_persona_by_id(persona_id=query_req.persona_id, user_id=user_id, db_session=db_session)
         llm_override = persona.llm_model_version_override
 
     qa_model = get_question_answer_model(
@@ -193,9 +176,7 @@ def stream_answer_objects(
     )
 
     full_prompt_str = (
-        qa_model.build_prompt(
-            query=query_msg.message, history_str=history_str, context_chunks=llm_chunks
-        )
+        qa_model.build_prompt(query=query_msg.message, history_str=history_str, context_chunks=llm_chunks)
         if qa_model is not None
         else "Gen AI Disabled"
     )
@@ -217,6 +198,7 @@ def stream_answer_objects(
             prompt=full_prompt_str,
             llm_context_docs=llm_chunks,
             metrics_callback=llm_metrics_callback,
+            return_contexts=query_req.return_contexts,
         )
         if qa_model is not None
         else no_gen_ai_response()
@@ -251,9 +233,7 @@ def stream_answer_objects(
         commit=True,
     )
 
-    msg_detail_response = translate_db_message_to_chat_message_detail(
-        gen_ai_response_message
-    )
+    msg_detail_response = translate_db_message_to_chat_message_detail(gen_ai_response_message)
 
     yield msg_detail_response
 
@@ -264,9 +244,7 @@ def stream_search_answer(
     user: User | None,
     db_session: Session,
 ) -> Iterator[str]:
-    objects = stream_answer_objects(
-        query_req=query_req, user=user, db_session=db_session
-    )
+    objects = stream_answer_objects(query_req=query_req, user=user, db_session=db_session)
     for obj in objects:
         yield get_json_line(obj.dict())
 
@@ -278,10 +256,10 @@ def get_search_answer(
     answer_generation_timeout: int = QA_TIMEOUT,
     enable_reflexion: bool = False,
     bypass_acl: bool = False,
-    retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None]
-    | None = None,
+    retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None] | None = None,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
     llm_metrics_callback: Callable[[LLMMetricsContainer], None] | None = None,
+    return_contexts: bool = False,
 ) -> OneShotQAResponse:
     """Collects the streamed one shot answer responses into a single object"""
     qa_response = OneShotQAResponse()
@@ -295,6 +273,7 @@ def get_search_answer(
         retrieval_metrics_callback=retrieval_metrics_callback,
         rerank_metrics_callback=rerank_metrics_callback,
         llm_metrics_callback=llm_metrics_callback,
+        return_contexts=return_contexts,
     )
 
     answer = ""
@@ -308,6 +287,8 @@ def get_search_answer(
         elif isinstance(packet, LLMRelevanceFilterResponse):
             qa_response.llm_chunks_indices = packet.relevant_chunk_indices
         elif isinstance(packet, DanswerQuotes):
+            qa_response.quotes = packet
+        elif isinstance(packet, DanswerContexts):
             qa_response.quotes = packet
         elif isinstance(packet, StreamingError):
             qa_response.error_msg = packet.error
