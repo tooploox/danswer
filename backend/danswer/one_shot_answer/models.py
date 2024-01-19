@@ -3,7 +3,7 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic import root_validator
 
-from danswer.chat.models import DanswerQuotes
+from danswer.chat.models import DanswerQuotes, DanswerContexts
 from danswer.chat.models import QADocsResponse
 from danswer.configs.constants import MessageType
 from danswer.search.models import RetrievalDetails
@@ -25,11 +25,10 @@ class DirectQARequest(BaseModel):
     persona_id: int
     retrieval_options: RetrievalDetails
     chain_of_thought: bool = False
+    return_contexts: bool = False
 
     @root_validator
-    def check_chain_of_thought_and_prompt_id(
-        cls, values: dict[str, Any]
-    ) -> dict[str, Any]:
+    def check_chain_of_thought_and_prompt_id(cls, values: dict[str, Any]) -> dict[str, Any]:
         chain_of_thought = values.get("chain_of_thought")
         prompt_id = values.get("prompt_id")
 
@@ -53,3 +52,4 @@ class OneShotQAResponse(BaseModel):
     error_msg: str | None = None
     answer_valid: bool = True  # Reflexion result, default True if Reflexion not run
     chat_message_id: int | None = None
+    return_contexts: bool = False

@@ -90,27 +90,18 @@ def get_tags(
         sources=sources,
         db_session=db_session,
     )
-    server_tags = [
-        SourceTag(
-            tag_key=db_tag.tag_key, tag_value=db_tag.tag_value, source=db_tag.source
-        )
-        for db_tag in db_tags
-    ]
+    server_tags = [SourceTag(tag_key=db_tag.tag_key, tag_value=db_tag.tag_value, source=db_tag.source) for db_tag in db_tags]
     return TagResponse(tags=server_tags)
 
 
 @basic_router.post("/search-intent")
-def get_search_type(
-    simple_query: SimpleQueryRequest, _: User = Depends(current_user)
-) -> HelperResponse:
+def get_search_type(simple_query: SimpleQueryRequest, _: User = Depends(current_user)) -> HelperResponse:
     logger.info(f"Calculating intent for {simple_query.query}")
     return recommend_search_flow(simple_query.query)
 
 
 @basic_router.post("/query-validation")
-def query_validation(
-    simple_query: SimpleQueryRequest, _: User = Depends(current_user)
-) -> QueryValidationResponse:
+def query_validation(simple_query: SimpleQueryRequest, _: User = Depends(current_user)) -> QueryValidationResponse:
     # Note if weak model prompt is chosen, this check does not occur and will simply return that
     # the query is valid, this is because weaker models cannot really handle this task well.
     # Additionally, some weak model servers cannot handle concurrent inferences.
@@ -120,16 +111,12 @@ def query_validation(
 
 
 @basic_router.post("/stream-query-validation")
-def stream_query_validation(
-    simple_query: SimpleQueryRequest, _: User = Depends(current_user)
-) -> StreamingResponse:
+def stream_query_validation(simple_query: SimpleQueryRequest, _: User = Depends(current_user)) -> StreamingResponse:
     # Note if weak model prompt is chosen, this check does not occur and will simply return that
     # the query is valid, this is because weaker models cannot really handle this task well.
     # Additionally, some weak model servers cannot handle concurrent inferences.
     logger.info(f"Validating query: {simple_query.query}")
-    return StreamingResponse(
-        stream_query_answerability(simple_query.query), media_type="application/json"
-    )
+    return StreamingResponse(stream_query_answerability(simple_query.query), media_type="application/json")
 
 
 @basic_router.post("/stream-answer-with-quote")
@@ -140,7 +127,5 @@ def get_answer_with_quote(
 ) -> StreamingResponse:
     query = query_request.messages[0].message
     logger.info(f"Received query for one shot answer with quotes: {query}")
-    packets = stream_search_answer(
-        query_req=query_request, user=user, db_session=db_session
-    )
+    packets = stream_search_answer(query_req=query_request, user=user, db_session=db_session)
     return StreamingResponse(packets, media_type="application/json")

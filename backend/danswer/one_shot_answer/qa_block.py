@@ -5,10 +5,10 @@ from collections.abc import Iterator
 from typing import cast
 
 from danswer.chat.chat_utils import build_context_str
-from danswer.chat.models import AnswerQuestionStreamReturn
+from danswer.chat.models import AnswerQuestionStreamReturn, DanswerContext
 from danswer.chat.models import DanswerAnswer
 from danswer.chat.models import DanswerAnswerPiece
-from danswer.chat.models import DanswerQuotes
+from danswer.chat.models import DanswerQuotes, DanswerContexts
 from danswer.chat.models import LlmDoc
 from danswer.chat.models import LLMMetricsContainer
 from danswer.chat.models import StreamingError
@@ -59,9 +59,7 @@ class QAHandler(abc.ABC):
     ) -> str:
         raise NotImplementedError
 
-    def process_llm_token_stream(
-        self, tokens: Iterator[str], context_chunks: list[InferenceChunk]
-    ) -> AnswerQuestionStreamReturn:
+    def process_llm_token_stream(self, tokens: Iterator[str], context_chunks: list[InferenceChunk]) -> AnswerQuestionStreamReturn:
         yield from process_model_tokens(
             tokens=tokens,
             context_docs=context_chunks,
@@ -104,9 +102,7 @@ class WeakLLMQAHandler(QAHandler):
     ) -> str:
         context_block = ""
         if context_chunks:
-            context_block = CONTEXT_BLOCK.format(
-                context_docs_str=context_chunks[0].content
-            )
+            context_block = CONTEXT_BLOCK.format(context_docs_str=context_chunks[0].content)
 
         prompt_str = WEAK_LLM_PROMPT.format(
             system_prompt=self.system_prompt,
@@ -140,14 +136,10 @@ class SingleMessageQAHandler(QAHandler):
     def is_json_output(self) -> bool:
         return True
 
-    def build_prompt(
-        self, query: str, history_str: str, context_chunks: list[InferenceChunk]
-    ) -> str:
+    def build_prompt(self, query: str, history_str: str, context_chunks: list[InferenceChunk]) -> str:
         context_block = ""
         if context_chunks:
-            context_docs_str = build_context_str(
-                cast(list[LlmDoc | InferenceChunk], context_chunks)
-            )
+            context_docs_str = build_context_str(cast(list[LlmDoc | InferenceChunk], context_chunks))
             context_block = CONTEXT_BLOCK.format(context_docs_str=context_docs_str)
 
         history_block = ""
@@ -160,9 +152,7 @@ class SingleMessageQAHandler(QAHandler):
             history_block=history_block,
             task_prompt=self.task_prompt,
             user_query=query,
-            language_hint_or_none=LANGUAGE_HINT.strip()
-            if self.use_language_hint
-            else "",
+            language_hint_or_none=LANGUAGE_HINT.strip() if self.use_language_hint else "",
         ).strip()
         return full_prompt
 
@@ -191,27 +181,19 @@ class SingleMessageScratchpadHandler(QAHandler):
     def is_json_output(self) -> bool:
         return True
 
-    def build_prompt(
-        self, query: str, history_str: str, context_chunks: list[InferenceChunk]
-    ) -> str:
-        context_docs_str = build_context_str(
-            cast(list[LlmDoc | InferenceChunk], context_chunks)
-        )
+    def build_prompt(self, query: str, history_str: str, context_chunks: list[InferenceChunk]) -> str:
+        context_docs_str = build_context_str(cast(list[LlmDoc | InferenceChunk], context_chunks))
 
         # Outdated
         prompt = COT_PROMPT.format(
             context_docs_str=context_docs_str,
             user_query=query,
-            language_hint_or_none=LANGUAGE_HINT.strip()
-            if self.use_language_hint
-            else "",
+            language_hint_or_none=LANGUAGE_HINT.strip() if self.use_language_hint else "",
         ).strip()
 
         return prompt
 
-    def process_llm_output(
-        self, model_output: str, context_chunks: list[InferenceChunk]
-    ) -> tuple[DanswerAnswer, DanswerQuotes]:
+    def process_llm_output(self, model_output: str, context_chunks: list[InferenceChunk]) -> tuple[DanswerAnswer, DanswerQuotes]:
         logger.debug(model_output)
 
         model_clean = clean_up_code_blocks(model_output)
@@ -222,22 +204,14 @@ class SingleMessageScratchpadHandler(QAHandler):
 
         final_json = escape_newlines(model_clean[match.start() :])
 
-        return process_answer(
-            final_json, context_chunks, is_json_prompt=self.is_json_output
-        )
+        return process_answer(final_json, context_chunks, is_json_prompt=self.is_json_output)
 
-    def process_llm_token_stream(
-        self, tokens: Iterator[str], context_chunks: list[InferenceChunk]
-    ) -> AnswerQuestionStreamReturn:
+    def process_llm_token_stream(self, tokens: Iterator[str], context_chunks: list[InferenceChunk]) -> AnswerQuestionStreamReturn:
         # Can be supported but the parsing is more involved, not handling until needed
-        raise ValueError(
-            "This Scratchpad approach is not suitable for real time uses like streaming"
-        )
+        raise ValueError("This Scratchpad approach is not suitable for real time uses like streaming")
 
 
-def build_dummy_prompt(
-    system_prompt: str, task_prompt: str, retrieval_disabled: bool
-) -> str:
+def build_dummy_prompt(system_prompt: str, task_prompt: str, retrieval_disabled: bool) -> str:
     if retrieval_disabled:
         return PARAMATERIZED_PROMPT_WITHOUT_CONTEXT.format(
             user_query="<USER_QUERY>",
@@ -268,9 +242,7 @@ class QABlock(QAModel):
         history_str: str,
         context_chunks: list[InferenceChunk],
     ) -> str:
-        prompt = self._qa_handler.build_prompt(
-            query=query, history_str=history_str, context_chunks=context_chunks
-        )
+        prompt = self._qa_handler.build_prompt(query=query, history_str=history_str, context_chunks=context_chunks)
         return prompt
 
     def answer_question_stream(
@@ -278,36 +250,37 @@ class QABlock(QAModel):
         prompt: str,
         llm_context_docs: list[InferenceChunk],
         metrics_callback: Callable[[LLMMetricsContainer], None] | None = None,
+        return_contexts: bool = False,
     ) -> AnswerQuestionStreamReturn:
         tokens_stream = self._llm.stream(prompt)
 
         captured_tokens = []
 
         try:
-            for answer_piece in self._qa_handler.process_llm_token_stream(
-                iter(tokens_stream), llm_context_docs
-            ):
-                if (
-                    isinstance(answer_piece, DanswerAnswerPiece)
-                    and answer_piece.answer_piece
-                ):
+            for answer_piece in self._qa_handler.process_llm_token_stream(iter(tokens_stream), llm_context_docs):
+                if isinstance(answer_piece, DanswerAnswerPiece) and answer_piece.answer_piece:
                     captured_tokens.append(answer_piece.answer_piece)
                 yield answer_piece
+
+            if return_contexts:
+                yield DanswerContexts(
+                    contexts=[
+                        DanswerContext(
+                            content=context_doc.content,
+                            document_id=context_doc.document_id,
+                            semantic_identifier=context_doc.semantic_identifier,
+                            blurb=context_doc.semantic_identifier,
+                        )
+                        for context_doc in llm_context_docs
+                    ]
+                )
 
         except Exception as e:
             yield StreamingError(error=str(e))
 
         if metrics_callback is not None:
-            prompt_tokens = check_number_of_tokens(
-                text=str(prompt), encode_fn=get_default_llm_token_encode()
-            )
+            prompt_tokens = check_number_of_tokens(text=str(prompt), encode_fn=get_default_llm_token_encode())
 
-            response_tokens = check_number_of_tokens(
-                text="".join(captured_tokens), encode_fn=get_default_llm_token_encode()
-            )
+            response_tokens = check_number_of_tokens(text="".join(captured_tokens), encode_fn=get_default_llm_token_encode())
 
-            metrics_callback(
-                LLMMetricsContainer(
-                    prompt_tokens=prompt_tokens, response_tokens=response_tokens
-                )
-            )
+            metrics_callback(LLMMetricsContainer(prompt_tokens=prompt_tokens, response_tokens=response_tokens))

@@ -33,9 +33,7 @@ class QADocsResponse(RetrievalDocs):
 
     def dict(self, *args: list, **kwargs: dict[str, Any]) -> dict[str, Any]:  # type: ignore
         initial_dict = super().dict(*args, **kwargs)  # type: ignore
-        initial_dict["applied_time_cutoff"] = (
-            self.applied_time_cutoff.isoformat() if self.applied_time_cutoff else None
-        )
+        initial_dict["applied_time_cutoff"] = self.applied_time_cutoff.isoformat() if self.applied_time_cutoff else None
         return initial_dict
 
 
@@ -74,6 +72,17 @@ class DanswerQuotes(BaseModel):
     quotes: list[DanswerQuote]
 
 
+class DanswerContext(BaseModel):
+    content: str
+    document_id: str
+    semantic_identifier: str
+    blurb: str
+
+
+class DanswerContexts(BaseModel):
+    contexts: list[DanswerContext]
+
+
 class DanswerAnswer(BaseModel):
     answer: str | None
 
@@ -90,9 +99,7 @@ class QAResponse(SearchResponse, DanswerAnswer):
 AnswerQuestionReturn = tuple[DanswerAnswer, DanswerQuotes]
 
 
-AnswerQuestionStreamReturn = Iterator[
-    DanswerAnswerPiece | DanswerQuotes | StreamingError
-]
+AnswerQuestionStreamReturn = Iterator[DanswerAnswerPiece | DanswerQuotes | DanswerContexts | StreamingError]
 
 
 class LLMMetricsContainer(BaseModel):
